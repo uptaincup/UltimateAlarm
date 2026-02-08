@@ -1,2 +1,2 @@
-default_fqbn: esp32:esp32:XIAO_ESP32C6
+default_fqbn: esp32:esp32:makergo_c3_supermini
 default_port: /dev/ttyACM0
