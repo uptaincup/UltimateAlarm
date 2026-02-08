@@ -1,0 +1,13 @@
+board_manager:
+  additional_urls: []
+daemon:
+  port: "50051"
+directories:
+  data: /home/cs4/.arduino15
+  downloads: /home/cs4/.arduino15/staging
+  user: /home/cs4/Arduino
+logging:
+  file: ""
+  format: text
+  level: info
+

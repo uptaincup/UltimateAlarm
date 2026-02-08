@@ -1,0 +1,20 @@
+Env:
+On ubuntu:
+IDE ->
+- Build arduino IDE with. 
+(becouse arduino ide is has bug, or more likely ubunty has hard to fix permission access from arduino ide's appimage to ports.)
+(platfromio btw for some reason cant get accesss too. Plus as of now lags behind and didnt added support for c6 of many neccessary libs)
+
+- Flash with esptool manually.
+- code in nvim, platfromio, or where you want. 
+
+
+
+
+
+Project setup
+
+// !!!!!!!!!!!!!!!!!
+// doezs not take affect do to a bug either in arduino ide v2 or elegant ota lib. so must be set directly by patching librarys /home/cs4/Arduino/libraries/ElegantOTA/src/ElegantOTA.cpp
+// before any includes              
+#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
