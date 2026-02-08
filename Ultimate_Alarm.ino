@@ -6,21 +6,23 @@
 #include "Wire.h"
 #include "SPI.h"
 
-LSM6DS3 myIMU; //Default constructor is I2C, addr 0x6B
+
+// LSM6DS3 myIMU; //Default constructor is I2C, addr 0x6B
+LSM6DS3 myIMU( I2C_MODE, 0x6B );
 
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(9600);
+
+static constexpr int SCL_PIN = 3;   // set your SCL GPIO
+static constexpr int SDA_PIN = 4;   // set your SDA GPIO
+
+  Wire.begin(SDA_PIN,SCL_PIN);
   delay(1000); //relax...
   Serial.println("Processor came out of reset.\n");
   
   //Call .begin() to configure the IMU
-  myIMU.begin();?
-
-// Create instance of the driver class
-LSM6DS3 SensorOne( I2C_MODE, 0x6A );
-// LSM6DS3 SensorTwo( I2C_MODE, 0x6B );
-
+  myIMU.begin();
   
 }
 
