@@ -14,10 +14,16 @@
 // #include <RemoteDebug.h> // does not support c6 as of now. only c3. they are different arhitecture like riscv and arm
 #include <WebSerial.h>
 
+
+#include <Wire.h>
+#include "RTClib.h"
+RTC_DS3231 rtc; // Create an RTC object
+
 /* ---------------- I/O ---------------- */
 constexpr int BUZZER_PIN = 3;
 constexpr int BUILT_IN_LED = 15;
-
+constexpr int SCL_PIN = 22;
+constexpr int SDA_PIN = 23;
 /* ---------------- WiFi ---------------- */
 const char* ssid     = "Our^_^Home";
 const char* password = "j/-%O-xo!IRr1Vh@vs";
@@ -49,7 +55,22 @@ void onOTAEnd(bool success) {
 /* ---------------- Setup ---------------- */
 void setup() {
     Serial.begin(115200);
-    delay(1000);
+    Wire.begin(SDA_PIN, SCL_PIN); // Initialize I2C communication
+    delay(2000);
+
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while ( 1); // Stop the program here if the RTC is not found
+  }
+
+  // Check if the RTC lost power and set the time if needed
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, let's set the time!");
+    // Set the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // You can also set a specific date and time like this:
+    // rtc.adjust(DateTime(2025, 2, 7, 2, 19, 0)); // Year, Month, Day, Hour, Min, Sec
+  }
 
     pinMode(BUILT_IN_LED, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
@@ -100,6 +121,32 @@ void setup() {
     // Serial.println("RemoteDebug ready");
 }
 
+void rtcDemo () {
+  DateTime now = rtc.now(); // Get the current date and time
+
+  // Print the date and time to the Serial Monitor
+  Serial.print(now.year(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.day(), DEC);
+  Serial.print(" (");
+  Serial.print(now.dayOfTheWeek()); // Print the day of the week
+  Serial.print(") ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.println();
+
+  // Print the t emperature (DS3231 feature)
+  Serial.print("Temperature: ");
+  Serial.print(rtc.getTemperature());
+  Serial.println(" C");
+
+  delay(3000); // Wait for 3 seconds before the next reading
+}
 /* ---------------- Loop ---------------- */
 void loop() {
     ElegantOTA.loop();
@@ -114,4 +161,6 @@ void loop() {
     }
 
     delay(1);
+
+    rtcDemo();
 }
