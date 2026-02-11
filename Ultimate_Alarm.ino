@@ -1,6 +1,6 @@
 // !!!!!!!!!!!!!!!!!
 // doezs not take affect do to a bug either in arduino ide v2 or elegant ota lib. so must be set directly by patching librarys /home/cs4/Arduino/libraries/ElegantOTA/src/ElegantOTA.cpp
-// before any includes              
+// before any includes
 #define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
 
 
@@ -14,9 +14,15 @@
 // #include <RemoteDebug.h> // does not support c6 as of now. only c3. they are different arhitecture like riscv and arm
 #include <WebSerial.h>
 
+#include "SparkFunLSM6DS3.h"
+LSM6DS3 myIMU( I2C_MODE, 0x6B );
+
 /* ---------------- I/O ---------------- */
 constexpr int BUZZER_PIN = 3;
 constexpr int BUILT_IN_LED = 15;
+
+constexpr int SCL_PIN = 22;
+constexpr int SDA_PIN = 23;
 
 /* ---------------- WiFi ---------------- */
 const char* ssid     = "Our^_^Home";
@@ -46,15 +52,45 @@ void onOTAEnd(bool success) {
     Serial.println(success ? "OTA success" : "OTA failed");
 }
 
+void imuDemo()
+{
+  //Get all parameters
+  Serial.print("\nAccelerometer:\n");
+  Serial.print(" X = ");
+  Serial.println(myIMU.readFloatAccelX(), 4);
+  Serial.print(" Y = ");
+  Serial.println(myIMU.readFloatAccelY(), 4);
+  Serial.print(" Z = ");
+  Serial.println(myIMU.readFloatAccelZ(), 4);
+
+  Serial.print("\nGyroscope:\n");
+  Serial.print(" X = ");
+  Serial.println(myIMU.readFloatGyroX(), 4);
+  Serial.print(" Y = ");
+  Serial.println(myIMU.readFloatGyroY(), 4);
+  Serial.print(" Z = ");
+  Serial.println(myIMU.readFloatGyroZ(), 4);
+
+  Serial.print("\nThermometer:\n");
+  Serial.print(" Degrees C = ");
+  Serial.println(myIMU.readTempC(), 4);
+  Serial.print(" Degrees F = ");
+  Serial.println(myIMU.readTempF(), 4);
+
+  delay(1000);
+}
 /* ---------------- Setup ---------------- */
 void setup() {
     Serial.begin(115200);
+    Wire.begin(SDA_PIN,SCL_PIN);
     delay(1000);
 
     pinMode(BUILT_IN_LED, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
 
     Serial.println("Booting...");
+
+    myIMU.begin();
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
@@ -114,4 +150,6 @@ void loop() {
     }
 
     delay(1);
+
+    imuDemo();
 }
