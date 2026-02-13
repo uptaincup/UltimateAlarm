@@ -15,7 +15,7 @@
 #include <WebSerial.h>
 
 /* ---------------- I/O ---------------- */
-constexpr int BUZZER_PIN = 3;
+constexpr int BUZZER_PIN = 16;
 constexpr int BUILT_IN_LED = 15;
 
 /* ---------------- WiFi ---------------- */
