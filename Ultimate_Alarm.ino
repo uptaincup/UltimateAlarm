@@ -17,7 +17,7 @@
 /* ---------------- I/O ---------------- */
 constexpr int BUZZER_PIN = 16;
 constexpr int BUILT_IN_LED = 15;
-
+constexpr int HAPTIC_PIN = 21;
 /* ---------------- WiFi ---------------- */
 const char* ssid     = "Our^_^Home";
 const char* password = "j/-%O-xo!IRr1Vh@vs";
@@ -53,6 +53,7 @@ void setup() {
 
     pinMode(BUILT_IN_LED, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(HAPTIC_PIN, OUTPUT);
 
     Serial.println("Booting...");
 
@@ -110,6 +111,7 @@ void loop() {
     if (millis() - t > 1000) {
         t = millis();
         digitalWrite(BUILT_IN_LED, !digitalRead(BUILT_IN_LED));
+        digitalWrite(HAPTIC_PIN, !digitalRead(HAPTIC_PIN));
         // debugV("alive");
     }
 
