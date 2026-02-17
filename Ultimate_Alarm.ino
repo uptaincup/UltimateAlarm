@@ -1,5 +1,11 @@
 #include <Arduino.h>
 #include "SparkFunLSM6DS3.h"
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
+
+// static constexpr uint64_t WAKE_SECONDS = 60*60*12; // 12h
+static constexpr uint64_t WAKE_SECONDS = 20; // s
+
 
 LSM6DS3 myIMU( I2C_MODE, 0x6B );
 
@@ -8,21 +14,29 @@ LSM6DS3 myIMU( I2C_MODE, 0x6B );
 constexpr int GPIO0 = 0;
 constexpr int GPIO1 = 1;
 constexpr int GPIO2 = 2;
-constexpr int HAPTIC_PIN = 21;
+constexpr int GPIO21 = 21;
 constexpr int SCL_PIN = 22;
 constexpr int SDA_PIN = 23;
 constexpr int BUILT_IN_LED = 15;
-constexpr int BUZZER_PIN = 16;
+constexpr int GPIO16 = 16;
 constexpr int GPIO17 = 17;
 constexpr int GPIO19 = 19;
 constexpr int GPIO20 = 20;
 constexpr int GPIO18 = 18;
-constexpr int GPIO7 = 7;
-constexpr int GPIO5 = 5;
+constexpr int BUZZER_PIN = 7;
+constexpr int HAPTIC_PIN = 5;
 constexpr int GPIO6 = 6;
 constexpr int GPIO4 = 4;
 
 
+static inline gpio_num_t G(int pin) { return (gpio_num_t)pin; }
+
+void beepAlive() { // Beep. Board is alive
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(200);
+    digitalWrite(BUZZER_PIN, LOW);
+
+} 
 
 /* ---------------- Setup ---------------- */
 void setup() {
@@ -40,8 +54,8 @@ void setup() {
     pinMode(GPIO19, OUTPUT);
     pinMode(GPIO20, OUTPUT);
     pinMode(GPIO18, OUTPUT);
-    pinMode(GPIO7, OUTPUT);
-    pinMode(GPIO5, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
+    pinMode(HAPTIC_PIN, OUTPUT);
     pinMode(GPIO6, OUTPUT);
     pinMode(GPIO4, OUTPUT);
 
@@ -57,8 +71,8 @@ void setup() {
     digitalWrite(GPIO19, LOW);
     digitalWrite(GPIO20, LOW);
     digitalWrite(GPIO18, LOW);
-    digitalWrite(GPIO7, LOW);
-    digitalWrite(GPIO5, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(HAPTIC_PIN, LOW);
     digitalWrite(GPIO6, LOW);
     digitalWrite(GPIO4, LOW);
 
@@ -74,18 +88,47 @@ void setup() {
 
     Serial.begin(115200);
 
+    delay(1000); // 1 sec of silence (after constant beep during flash, and firs consious alive beep)
 
-    delay(1000); // 1 sec of silence (after constant beep during flash)
-
-
-    // Beep. Board is alive
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(200);
-    digitalWrite(BUZZER_PIN, LOW);
-
-
-    Serial.println("Booted...");
 }
+
+void afterSleepChores(){
+    // unhold pinns so they are usable again
+    rtc_gpio_hold_dis(G(HAPTIC_PIN));
+    rtc_gpio_hold_dis(G(BUZZER_PIN));
+}
+
+void beforeSleepChores(){
+    // Deep Sleep
+    // Enable hold per-pin (required)
+    // Pin Must support LP!
+    esp_err_t e1 = rtc_gpio_hold_en(G(HAPTIC_PIN));
+    esp_err_t e2 = rtc_gpio_hold_en(G(BUZZER_PIN));
+
+    // Force holds during sleep (affects pins that were successfully hold-enabled)
+    rtc_gpio_force_hold_en_all();
+}
+
+
 
 void loop() {
+
+    afterSleepChores();
+
+    beepAlive();
+    Serial.println("Booted...");
+
+    // keep wake to have window to connect and re-flash if needed.    
+    Serial.println("Flash window. tens of seconds.");    
+    delay(20000);
+    
+    Serial.println("Going to sleep for a long time...");    
+    esp_sleep_enable_timer_wakeup(WAKE_SECONDS * 1000000ULL);
+
+    beforeSleepChores();
+    // Sleep    
+    // esp_light_sleep_start();
+    esp_deep_sleep_start();
+
 }
+
