@@ -107,7 +107,7 @@ static void setupTapInterrupt() {
 
   // Set tap threshold
   // Write 0Ch into TAP_THS_6D
-  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_TAP_THS_6D, 0x03);
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_TAP_THS_6D, 0x15); // was 0x03
 
   // Set Duration, Quiet and Shock time windows
   // Write 7Fh into INT_DUR2
