@@ -58,7 +58,9 @@ void setup() {
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    // WiFi.setTxPower(WIFI_POWER_8_5dBm); 
+     WiFi.setTxPower(WIFI_POWER_19_5dBm); // default-ish max power
+ //   WiFi.setTxPower(WIFI_POWER_MINUS_1dBm); // minimal power but not off
 
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
