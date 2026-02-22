@@ -1,3 +1,14 @@
+// cs4:todo: all this
+// 1) make i2c on LP lines
+// 2) IMU is wrong, should be in low power mode and more economic - see chat gpt. gyro must be turned of manually untill it needed + experiment to meke it go to sleep mode..
+// 3) RTC ... do mods..
+// 4) INT1, INT2, SQW ? maybe combine some?
+// 5) all solder in prototype mode to measure how much bat last.
+
+// toDo:check:2394349880: timer should use RTC_INT_PIN
+// was rtc pin, then IMU used it, and renamed to IMU pin. But lines that set it to high (for rtc) and hold it in sleep were for RTC, and bc IMU uses same pin by mistake its 
+// possible that IMU is redundantly configured based on HIGH (set for RTC) drop to low. it could be low to high (if this isdefauult the why not... dont overconfigure)
+
 #include "SparkFunLSM6DS3.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
@@ -12,22 +23,14 @@ LSM6DS3 myIMU(I2C_MODE, 0x6B);
 volatile uint8_t int1Status = 0;
 
 /* ---------------- I/O ---------------- */
-constexpr int GPIO0 = 0;
-constexpr int IMU_INT_PIN = 1;
-constexpr int GPIO2 = 2;
-constexpr int GPIO21 = 21;
-constexpr int SCL_PIN = 22;
-constexpr int SDA_PIN = 23;
+constexpr int SDA_PIN = 0;
+constexpr int SCL_PIN = 1;
+constexpr int IMU_INT1_PIN = 7;
+constexpr int IMU_INT2_PIN = 5;
+constexpr int RTC_INT_PIN = 2;
 constexpr int BUILT_IN_LED = 15;
-constexpr int GPIO16 = 16;
-constexpr int GPIO17 = 17;
-constexpr int GPIO19 = 19;
-constexpr int GPIO20 = 20;
-constexpr int GPIO18 = 18;
-constexpr int BUZZER_PIN = 7;
-constexpr int HAPTIC_PIN = 5;
-constexpr int GPIO6 = 6;
-constexpr int GPIO4 = 4;
+constexpr int BUZZER_PIN = 4;
+constexpr int HAPTIC_PIN = 6;
 
 static inline gpio_num_t G(int pin) { return (gpio_num_t)pin; }
 
@@ -131,9 +134,8 @@ static void setupTapInterrupt() {
 
   // Configure the interrupt pin
   //  ESP pin: idle HIGH expected, interrupt on FALLING (active-low assertion)
-  pinMode(IMU_INT_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(IMU_INT_PIN), int1ISR, FALLING);
-
+  pinMode(IMU_INT1_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(IMU_INT1_PIN), int1ISR, FALLING);
   // Clear pending sources
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
@@ -141,51 +143,34 @@ static void setupTapInterrupt() {
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
 #endif
 
-  Serial.printf("IMU_INT_PIN=%d level=%d\n", IMU_INT_PIN,
-                digitalRead(IMU_INT_PIN));
-
+  Serial.printf("IMU_INT1_PIN=%d level=%d\n", IMU_INT1_PIN,
+                digitalRead(IMU_INT1_PIN));
   // IMPORTANT CHANGE:
   // Deep sleep wake when pin goes LOW (active-low interrupt)
-  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
+  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
 }
 
 /* ---------------- Setup ---------------- */
 void setup() {
 
-  // Don't let gpios float:
-  pinMode(GPIO0, OUTPUT);
-  // pinMode(IMU_INT_PIN, OUTPUT);
-  pinMode(GPIO2, OUTPUT);
-  pinMode(HAPTIC_PIN, OUTPUT);
-  //     pinMode(SCL_PIN, OUTPUT);
-  //     pinMode(SDA_PIN, OUTPUT);
+  // Don't let gpios float at runtime:
+  // pinMode(SDA_PIN, OUTPUT);
+  // pinMode(SCL_PIN, OUTPUT);
+  // pinMode(IMU_INT1_PIN, OUTPUT);
+  // pinMode(IMU_INT2_PIN, 5UTPUT);
+  // pinMode(RTC_INT_PIN, OUTPUT);  
   pinMode(BUILT_IN_LED, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(GPIO17, OUTPUT);
-  pinMode(GPIO19, OUTPUT);
-  pinMode(GPIO20, OUTPUT);
-  pinMode(GPIO18, OUTPUT);
-  pinMode(BUZZER_PIN, OUTPUT);
   pinMode(HAPTIC_PIN, OUTPUT);
-  pinMode(GPIO6, OUTPUT);
-  pinMode(GPIO4, OUTPUT);
 
-  digitalWrite(GPIO0, LOW);
-  // digitalWrite(IMU_INT_PIN, LOW);
-  digitalWrite(GPIO2, LOW);
-  digitalWrite(HAPTIC_PIN, LOW);
-  //     digitalWrite(SCL_PIN, LOW);
-  //     digitalWrite(SDA_PIN, LOW);
+  // digitalWrite(SDA_PIN, LOW);
+  // digitalWrite(SCL_PIN, LOW);
+  // digitalWrite(IMU_INT1_PIN, LOW);
+  // digitalWrite(IMU_INT2_PIN, 5OW);
+  // digitalWrite(RTC_INT_PIN, LOW);
   digitalWrite(BUILT_IN_LED, HIGH); // turn off built-in led. its inverted
   digitalWrite(BUZZER_PIN, LOW);
-  digitalWrite(GPIO17, LOW);
-  digitalWrite(GPIO19, LOW);
-  digitalWrite(GPIO20, LOW);
-  digitalWrite(GPIO18, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(HAPTIC_PIN, LOW);
-  digitalWrite(GPIO6, LOW);
-  digitalWrite(GPIO4, LOW);
 
   Wire.begin(SDA_PIN, SCL_PIN);
 
@@ -250,15 +235,15 @@ void loop() {
   delay(20000);
 
   Serial.println("Going to sleep for a long time...");
-
+  
   // Enable Wake by timer
   // esp_sleep_enable_timer_wakeup(WAKE_SECONDS * 1000000ULL);
-  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
+  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW); // toDo:check:2394349880
+  
 
   // RTC-domain pullup for stability in deep sleep (matches idle HIGH)
-  rtc_gpio_pulldown_dis((gpio_num_t)IMU_INT_PIN);
-  rtc_gpio_pullup_en((gpio_num_t)IMU_INT_PIN);
-
+  rtc_gpio_pulldown_dis((gpio_num_t)IMU_INT1_PIN);
+  rtc_gpio_pullup_en((gpio_num_t)IMU_INT1_PIN);
   // Clear any latched tap from earlier so INT line is not stuck active
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
@@ -266,7 +251,7 @@ void loop() {
 #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
 #endif
-  Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT_PIN));
+  Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT1_PIN));
 
   beforeSleepChores();
   // Sleep
