@@ -14,6 +14,7 @@
 #include "esp_sleep.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include "RTClib.h"
 
 // static constexpr uint64_t WAKE_SECONDS = 60*60*12; // 12h
 static constexpr uint64_t WAKE_SECONDS = 20; // s
@@ -21,6 +22,7 @@ static constexpr uint64_t WAKE_SECONDS = 20; // s
 LSM6DS3 myIMU(I2C_MODE, 0x6B);
 volatile uint8_t int1Status = 0;
 
+RTC_DS3231 rtc;
 /* ---------------- I/O ---------------- */
 constexpr int SDA_PIN = 0;
 constexpr int SCL_PIN = 1;
@@ -150,6 +152,22 @@ static void setupImuAndTapInterrupt() {
   esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
 }
 
+void setupRTC(){
+    if (!rtc.begin()) {
+        Serial.println("Couldn't find RTC");
+        while ( 1); // Stop the program here if the RTC is not found
+    }
+
+    // Check if the RTC lost power and set the time if needed
+    if (rtc.lostPower()) {
+        Serial.println("RTC lost power, let's set the time!");
+        // Set the RTC to the date & time this sketch was compiled
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        // You can also set a specific date and time like this:
+        // rtc.adjust(DateTime(2025, 2, 7, 2, 19, 0)); // Year, Month, Day, Hour, Min, Sec
+    }
+
+}
 /* ---------------- Setup ---------------- */
 void setup() {
 
@@ -167,6 +185,7 @@ void setup() {
   Serial.begin(115200);
 
   setupImuAndTapInterrupt();
+  setupRTC();
 }
 
 void wakeUpChores() {
@@ -198,6 +217,33 @@ void beforeSleepChores() {
   imuBeforeSleepChores();
 }
 
+void rtcDemo () {
+  DateTime now = rtc.now(); // Get the current date and time
+
+  // Print the date and time to the Serial Monitor
+  Serial.print(now.year(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.day(), DEC);
+  Serial.print(" (");
+  Serial.print(now.dayOfTheWeek()); // Print the day of the week
+  Serial.print(") ");
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.println();
+
+  // Print the t emperature (DS3231 feature)
+  Serial.print("Temperature: ");
+  Serial.print(rtc.getTemperature());
+  Serial.println(" C");
+
+  delay(3000); // Wait for 3 seconds before the next reading
+}
+/* ---------------- Loop ---------------- */
 void loop() {
 
   wakeUpChores();
@@ -224,6 +270,7 @@ void loop() {
     int1Status = 0;
   }
 
+  rtcDemo();
   // keep wake to have window to connect and re-flash if needed.
   Serial.println("Flash window. tens of seconds.");
   delay(20000);
