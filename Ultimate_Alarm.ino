@@ -1,13 +1,12 @@
 // cs4:todo: all this
-// 1) make i2c on LP lines
-// 2) IMU is wrong, should be in low power mode and more economic - see chat gpt. gyro must be turned of manually untill it needed + experiment to meke it go to sleep mode..
-// 3) RTC ... do mods..
+//+1) make i2c on LP lines
+// 2) IMU is wrong, should be in low power mode and more economic - see chat gpt.
+//    + gyro must be turned of manually untill it needed 
+//    - & experiment to meke it go to sleep mode..
+//+3) RTC ... do mods..
 // 4) INT1, INT2, SQW ? maybe combine some?
-// 5) all solder in prototype mode to measure how much bat last.
+// 6) rtc_gpio_isolate work for non LP GPIOS in deep sleep! This is not a substitute held, but it should be used when possible. Not work for mosfet drivers as may be some charge despite isolation. while with bjt it will work
 
-// toDo:check:2394349880: timer should use RTC_INT_PIN
-// was rtc pin, then IMU used it, and renamed to IMU pin. But lines that set it to high (for rtc) and hold it in sleep were for RTC, and bc IMU uses same pin by mistake its 
-// possible that IMU is redundantly configured based on HIGH (set for RTC) drop to low. it could be low to high (if this isdefauult the why not... dont overconfigure)
 
 #include "SparkFunLSM6DS3.h"
 #include "driver/gpio.h"
@@ -47,8 +46,7 @@ void IRAM_ATTR int1ISR() {
 
 static void printWakeInfo() {
   Serial.printf("WAKE_CAUSE=%d\n", (int)esp_sleep_get_wakeup_cause());
-  Serial.printf("EXT1_STATUS=0x%llx\n",
-                (unsigned long long)esp_sleep_get_ext1_wakeup_status());
+  Serial.printf("EXT1_STATUS=0x%llx\n", (unsigned long long)esp_sleep_get_ext1_wakeup_status());
 }
 
 static void setupTapInterrupt() {
@@ -60,20 +58,16 @@ static void setupTapInterrupt() {
     Serial.print("\nbeginCore() passed.\n");
   }
 
+  // Shut down IMU
+  // Accelerometer power-down
+  // myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, 0x00);
+  // Gyroscope power-down
+  myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0x00);
+ 
   // Error accumulation variable
   uint8_t errorAccumulator = 0;
 
   uint8_t dataToWrite = 0; // Temporary variable
-
-  // IMU reset
-  myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL3_C, 0x01);
-  delay(50);
-  do {
-    myIMU.readRegister(&dataToWrite, LSM6DS3_ACC_GYRO_CTRL3_C);
-  } while (dataToWrite & 0x01);
-  do {
-    myIMU.readRegister(&dataToWrite, LSM6DS3_ACC_GYRO_CTRL3_C);
-  } while (dataToWrite & 0x01);
 
   // IMPORTANT CHANGE:
   // Make INT active-LOW explicitly (H_LACTIVE=1). Keep push-pull (PP_OD=0).
@@ -93,7 +87,7 @@ static void setupTapInterrupt() {
   dataToWrite |= LSM6DS3_ACC_GYRO_FS_XL_2g;
   dataToWrite |= LSM6DS3_ACC_GYRO_ODR_XL_416Hz;
 
-  // //Now, write the patched together data
+  // Now, write the patched together data
   errorAccumulator +=
       myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, dataToWrite);
 
@@ -132,19 +126,25 @@ static void setupTapInterrupt() {
     Serial.println("Device O.K.");
   }
 
+
   // Configure the interrupt pin
-  //  ESP pin: idle HIGH expected, interrupt on FALLING (active-low assertion)
+  // idle HIGH expected, interrupt on FALLING (active-low assertion)
   pinMode(IMU_INT1_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(IMU_INT1_PIN), int1ISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(IMU_INT1_PIN), int1ISR, FALLING); 
+
+  // RTC-domain pullup for stability in deep sleep (matches idle HIGH)
+  rtc_gpio_pulldown_dis((gpio_num_t)IMU_INT1_PIN);
+  rtc_gpio_pullup_en((gpio_num_t)IMU_INT1_PIN);
+
   // Clear pending sources
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
-#ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
-  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
-#endif
+  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
+    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
+  #endif
 
-  Serial.printf("IMU_INT1_PIN=%d level=%d\n", IMU_INT1_PIN,
-                digitalRead(IMU_INT1_PIN));
+  Serial.printf("IMU_INT1_PIN=%d level=%d\n", IMU_INT1_PIN, digitalRead(IMU_INT1_PIN));
+ 
   // IMPORTANT CHANGE:
   // Deep sleep wake when pin goes LOW (active-low interrupt)
   esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
@@ -154,20 +154,10 @@ static void setupTapInterrupt() {
 void setup() {
 
   // Don't let gpios float at runtime:
-  // pinMode(SDA_PIN, OUTPUT);
-  // pinMode(SCL_PIN, OUTPUT);
-  // pinMode(IMU_INT1_PIN, OUTPUT);
-  // pinMode(IMU_INT2_PIN, 5UTPUT);
-  // pinMode(RTC_INT_PIN, OUTPUT);  
   pinMode(BUILT_IN_LED, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(HAPTIC_PIN, OUTPUT);
 
-  // digitalWrite(SDA_PIN, LOW);
-  // digitalWrite(SCL_PIN, LOW);
-  // digitalWrite(IMU_INT1_PIN, LOW);
-  // digitalWrite(IMU_INT2_PIN, 5OW);
-  // digitalWrite(RTC_INT_PIN, LOW);
   digitalWrite(BUILT_IN_LED, HIGH); // turn off built-in led. its inverted
   digitalWrite(BUZZER_PIN, LOW);
   digitalWrite(HAPTIC_PIN, LOW);
@@ -176,16 +166,7 @@ void setup() {
 
   Serial.begin(115200);
 
-  delay(1000); // 1 sec of silence (after constant beep during flash, and firs
-               // consious alive beep)
-
   printWakeInfo();
-
-  myIMU.begin();
-  // Shut down IMU
-  // myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0x00); // Accelerometer
-  // power-down myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, 0x00); //
-  // Gyroscope power-down
 
   setupTapInterrupt();
 }
@@ -235,22 +216,17 @@ void loop() {
   delay(20000);
 
   Serial.println("Going to sleep for a long time...");
-  
+
   // Enable Wake by timer
   // esp_sleep_enable_timer_wakeup(WAKE_SECONDS * 1000000ULL);
-  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW); // toDo:check:2394349880
-  
 
-  // RTC-domain pullup for stability in deep sleep (matches idle HIGH)
-  rtc_gpio_pulldown_dis((gpio_num_t)IMU_INT1_PIN);
-  rtc_gpio_pullup_en((gpio_num_t)IMU_INT1_PIN);
+
   // Clear any latched tap from earlier so INT line is not stuck active
   uint8_t dummy = 0;
   myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
-
-#ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
-  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
-#endif
+  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
+    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
+  #endif
   Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT1_PIN));
 
   beforeSleepChores();
