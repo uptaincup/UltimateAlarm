@@ -49,7 +49,7 @@ static void printWakeInfo() {
   Serial.printf("EXT1_STATUS=0x%llx\n", (unsigned long long)esp_sleep_get_ext1_wakeup_status());
 }
 
-static void setupTapInterrupt() {
+static void setupImuAndTapInterrupt() {
 
   // Call .beginCore() to configure the IMU
   if (myIMU.beginCore() != 0) {
@@ -166,19 +166,26 @@ void setup() {
 
   Serial.begin(115200);
 
-  printWakeInfo();
-
-  setupTapInterrupt();
+  setupImuAndTapInterrupt();
 }
 
-void afterSleepChores() {
+void wakeUpChores() {
   // unhold pinns so they are usable again
   rtc_gpio_hold_dis(G(HAPTIC_PIN));
   rtc_gpio_hold_dis(G(BUZZER_PIN));
 }
 
+void imuBeforeSleepChores() {
+  // Clear any latched tap from earlier so INT line is not stuck active
+  uint8_t dummy = 0;
+  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
+  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
+    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
+  #endif
+  Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT1_PIN));
+}
+
 void beforeSleepChores() {
-  // Deep Sleep
   // Enable hold per-pin (required)
   // Pin Must support LP!
   esp_err_t e1 = rtc_gpio_hold_en(G(HAPTIC_PIN));
@@ -186,9 +193,20 @@ void beforeSleepChores() {
 
   // Force holds during sleep (affects pins that were successfully hold-enabled)
   // rtc_gpio_force_hold_en_all();
+
+
+  imuBeforeSleepChores();
 }
 
 void loop() {
+
+  wakeUpChores(); 
+  printWakeInfo();
+
+  beepAlive();
+  Serial.println("Booted...");
+
+  // todo:cs4:example
   if (int1Status > 0) // If ISR has been serviced at least once
   {
     // Wait for a window (in case a second tap is coming)
@@ -206,31 +224,17 @@ void loop() {
     int1Status = 0;
   }
 
-  afterSleepChores();
-
-  beepAlive();
-  Serial.println("Booted...");
-
   // keep wake to have window to connect and re-flash if needed.
   Serial.println("Flash window. tens of seconds.");
   delay(20000);
 
-  Serial.println("Going to sleep for a long time...");
-
   // Enable Wake by timer
   // esp_sleep_enable_timer_wakeup(WAKE_SECONDS * 1000000ULL);
 
-
-  // Clear any latched tap from earlier so INT line is not stuck active
-  uint8_t dummy = 0;
-  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
-  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
-    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
-  #endif
-  Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT1_PIN));
-
   beforeSleepChores();
+
   // Sleep
+  Serial.println("Going to sleep for a long time...");
   // esp_light_sleep_start();
   esp_deep_sleep_start();
 }
