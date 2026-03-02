@@ -1,121 +1,240 @@
-// !!!!!!!!!!!!!!!!!
-// doezs not take affect do to a bug either in arduino ide v2 or elegant ota lib. so must be set directly by patching librarys /home/cs4/Arduino/libraries/ElegantOTA/src/ElegantOTA.cpp
-// before any includes              
-#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
+// cs4:todo: all this
+//+1) make i2c on LP lines
+// 2) IMU is wrong, should be in low power mode and more economic - see chat gpt.
+//    + gyro must be turned of manually untill it needed
+//    - & experiment to meke it go to sleep mode..
+//+3) RTC ... do mods..
+// 4) INT1, INT2, SQW ? maybe combine some?
+// 6) rtc_gpio_isolate work for non LP GPIOS in deep sleep! This is not a substitute held, but it should be used when possible. Not work for mosfet drivers as may be some charge despite isolation. while with bjt it will work
 
 
+#include "SparkFunLSM6DS3.h"
+#include "driver/gpio.h"
+#include "driver/rtc_io.h"
+#include "esp_sleep.h"
 #include <Arduino.h>
-#include <WiFi.h>
-#include <ESPmDNS.h>
+#include <Wire.h>
 
-#include <ESPAsyncWebServer.h> // by ESP32Async
+// static constexpr uint64_t WAKE_SECONDS = 60*60*12; // 12h
+static constexpr uint64_t WAKE_SECONDS = 20; // s
 
-#include <ElegantOTA.h>
-// #include <RemoteDebug.h> // does not support c6 as of now. only c3. they are different arhitecture like riscv and arm
-#include <WebSerial.h>
+LSM6DS3 myIMU(I2C_MODE, 0x6B);
+volatile uint8_t int1Status = 0;
 
 /* ---------------- I/O ---------------- */
-constexpr int BUZZER_PIN = 16;
+constexpr int SDA_PIN = 0;
+constexpr int SCL_PIN = 1;
+constexpr int IMU_INT1_PIN = 7;
+constexpr int IMU_INT2_PIN = 5;
+constexpr int RTC_INT_PIN = 2;
 constexpr int BUILT_IN_LED = 15;
+constexpr int BUZZER_PIN = 4;
+constexpr int HAPTIC_PIN = 6;
 
-/* ---------------- WiFi ---------------- */
-const char* ssid     = "Our^_^Home";
-const char* password = "j/-%O-xo!IRr1Vh@vs";
+static inline gpio_num_t G(int pin) { return (gpio_num_t)pin; }
 
-String ESP32_HOST_ID = "alarm";
-
-/* ---------------- Globals ---------------- */
-AsyncWebServer server(80);
-// RemoteDebug Debug;
-
-unsigned long ota_progress_millis = 0;
-
-/* ---------------- OTA callbacks ---------------- */
-void onOTAStart() {
-    Serial.println("OTA update started!");
+void beepAlive() { // Beep. Board is alive
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(200);
+  digitalWrite(BUZZER_PIN, LOW);
 }
 
-void onOTAProgress(size_t current, size_t final) {
-    if (millis() - ota_progress_millis > 1000) {
-        ota_progress_millis = millis();
-        Serial.printf("OTA Progress: %u / %u bytes\n", current, final);
-    }
+void IRAM_ATTR int1ISR() {
+  // Serial.println("Interrupt serviced.");
+  int1Status++;
 }
 
-void onOTAEnd(bool success) {
-    Serial.println(success ? "OTA success" : "OTA failed");
+static void printWakeInfo() {
+  Serial.printf("WAKE_CAUSE=%d\n", (int)esp_sleep_get_wakeup_cause());
+  Serial.printf("EXT1_STATUS=0x%llx\n", (unsigned long long)esp_sleep_get_ext1_wakeup_status());
+}
+
+static void setupImuAndTapInterrupt() {
+
+  // Call .beginCore() to configure the IMU
+  if (myIMU.beginCore() != 0) {
+    Serial.print("Error at beginCore().\n");
+  } else {
+    Serial.print("\nbeginCore() passed.\n");
+  }
+
+  // Shut down IMU
+  // Accelerometer power-down
+  // myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL2_G, 0x00);
+  // Gyroscope power-down
+  myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, 0x00);
+
+  // Error accumulation variable
+  uint8_t errorAccumulator = 0;
+
+  uint8_t dataToWrite = 0; // Temporary variable
+
+  // IMPORTANT CHANGE:
+  // Make INT active-LOW explicitly (H_LACTIVE=1). Keep push-pull (PP_OD=0).
+  uint8_t c3 = 0;
+  errorAccumulator += myIMU.readRegister(&c3, LSM6DS3_ACC_GYRO_CTRL3_C);
+  c3 |= (uint8_t)0x20;  // H_LACTIVE = 1 (active low)
+  c3 &= (uint8_t)~0x10; // PP_OD    = 0 (push-pull)
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL3_C, c3);
+
+  uint8_t c3r = 0;
+  myIMU.readRegister(&c3r, LSM6DS3_ACC_GYRO_CTRL3_C);
+  Serial.printf("CTRL3_C=0x%02X\n", c3r);
+
+  // Setup the accelerometer
+  dataToWrite = 0; // Start Fresh!
+  dataToWrite |= LSM6DS3_ACC_GYRO_BW_XL_200Hz;
+  dataToWrite |= LSM6DS3_ACC_GYRO_FS_XL_2g;
+  dataToWrite |= LSM6DS3_ACC_GYRO_ODR_XL_416Hz;
+
+  // Now, write the patched together data
+  errorAccumulator +=
+      myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL1_XL, dataToWrite);
+
+  // Set the ODR bit
+  errorAccumulator +=
+      myIMU.readRegister(&dataToWrite, LSM6DS3_ACC_GYRO_CTRL4_C);
+  dataToWrite &= ~((uint8_t)LSM6DS3_ACC_GYRO_BW_SCAL_ODR_ENABLED);
+  errorAccumulator +=
+      myIMU.writeRegister(LSM6DS3_ACC_GYRO_CTRL4_C, dataToWrite);
+
+  // TARGET (enable XYZ tap + enable latch bit)
+  // If LIR is bit0 in TAP_CFG1 (common for LSM6DS3), this makes it latched.
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_TAP_CFG1, 0x0F);
+
+  // Set tap threshold
+  // Write 0Ch into TAP_THS_6D
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_TAP_THS_6D, 0x15); // was 0x03
+
+  // Set Duration, Quiet and Shock time windows
+  // Write 7Fh into INT_DUR2
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_INT_DUR2, 0x7F);
+
+  // Single & Double tap enabled (SINGLE_DOUBLE_TAP = 1)
+  // Write 80h into WAKE_UP_THS
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_THS, 0x80);
+  myIMU.writeRegister(LSM6DS3_ACC_GYRO_WAKE_UP_THS,
+                      0x80); // ToDo:cs4: this what missed in tutoral...
+
+  // Single tap interrupt driven to INT1 pin -- enable latch
+  // Write 08h into MD1_CFG
+  errorAccumulator += myIMU.writeRegister(LSM6DS3_ACC_GYRO_MD1_CFG, 0x48);
+
+  if (errorAccumulator) {
+    Serial.println("Problem configuring the device.");
+  } else {
+    Serial.println("Device O.K.");
+  }
+
+
+  // Configure the interrupt pin
+  // idle HIGH expected, interrupt on FALLING (active-low assertion)
+  pinMode(IMU_INT1_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(IMU_INT1_PIN), int1ISR, FALLING);
+
+  // RTC-domain pullup for stability in deep sleep (matches idle HIGH)
+  rtc_gpio_pulldown_dis((gpio_num_t)IMU_INT1_PIN);
+  rtc_gpio_pullup_en((gpio_num_t)IMU_INT1_PIN);
+
+  // Clear pending sources
+  uint8_t dummy = 0;
+  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
+  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
+    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
+  #endif
+
+  Serial.printf("IMU_INT1_PIN=%d level=%d\n", IMU_INT1_PIN, digitalRead(IMU_INT1_PIN));
+
+  // IMPORTANT CHANGE:
+  // Deep sleep wake when pin goes LOW (active-low interrupt)
+  esp_sleep_enable_ext1_wakeup(1ULL << IMU_INT1_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
 }
 
 /* ---------------- Setup ---------------- */
 void setup() {
-    Serial.begin(115200);
-    delay(1000);
 
-    pinMode(BUILT_IN_LED, OUTPUT);
-    pinMode(BUZZER_PIN, OUTPUT);
+  // Don't let gpios float at runtime:
+  pinMode(BUILT_IN_LED, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(HAPTIC_PIN, OUTPUT);
 
-    Serial.println("Booting...");
-    
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    // WiFi.setTxPower(WIFI_POWER_8_5dBm); 
-     WiFi.setTxPower(WIFI_POWER_19_5dBm); // default-ish max power
- //   WiFi.setTxPower(WIFI_POWER_MINUS_1dBm); // minimal power but not off
+  digitalWrite(BUILT_IN_LED, HIGH); // turn off built-in led. its inverted
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(HAPTIC_PIN, LOW);
 
-    Serial.println(WiFi.macAddress());
-     
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
+  Wire.begin(SDA_PIN, SCL_PIN);
 
-    Serial.println();
-    Serial.print("IP: ");
-    Serial.println(WiFi.localIP());
+  Serial.begin(115200);
 
-    /* -------- Web server -------- */
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/plain", "ElegantOTA Async OK");
-    });
-
-    ElegantOTA.begin(&server);
-    ElegantOTA.onStart(onOTAStart);
-    ElegantOTA.onProgress(onOTAProgress);
-    ElegantOTA.onEnd(onOTAEnd);
-
-    WebSerial.begin(&server);
-
-    server.begin();
-    Serial.println("HTTP server started");
-
-    /* -------- mDNS -------- */
-    if (!MDNS.begin(ESP32_HOST_ID.c_str())) {
-        Serial.println("MDNS failed");
-    } else {
-        Serial.println("MDNS started");
-    }
-
-    /* -------- RemoteDebug -------- */
-    // Debug.begin(ESP32_HOST_ID);
-    // Debug.setResetCmdEnabled(true);
-    // Debug.showProfiler(true);
-    // Debug.showColors(true);
-
-    // Serial.println("RemoteDebug ready");
+  setupImuAndTapInterrupt();
 }
 
-/* ---------------- Loop ---------------- */
-void loop() {
-    ElegantOTA.loop();
-    // Debug.handle();
-    WebSerial.loop();
+void wakeUpChores() {
+  // unhold pinns so they are usable again
+  rtc_gpio_hold_dis(G(HAPTIC_PIN));
+  rtc_gpio_hold_dis(G(BUZZER_PIN));
+}
 
-    static uint32_t t = 0;
-    if (millis() - t > 1000) {
-        t = millis();
-        digitalWrite(BUILT_IN_LED, !digitalRead(BUILT_IN_LED));
-        // debugV("alive");
+void imuBeforeSleepChores() {
+  // Clear any latched tap from earlier so INT line is not stuck active
+  uint8_t dummy = 0;
+  myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_TAP_SRC);
+  #ifdef LSM6DS3_ACC_GYRO_ALL_INT_SRC
+    myIMU.readRegister(&dummy, LSM6DS3_ACC_GYRO_ALL_INT_SRC);
+  #endif
+  Serial.printf("INT1 pre-sleep level=%d\n", digitalRead(IMU_INT1_PIN));
+}
+
+void beforeSleepChores() {
+  // Enable hold per-pin (required)
+  // Pin Must support LP!
+  esp_err_t e1 = rtc_gpio_hold_en(G(HAPTIC_PIN));
+  esp_err_t e2 = rtc_gpio_hold_en(G(BUZZER_PIN));
+
+  // Force holds during sleep (affects pins that were successfully hold-enabled)
+  // rtc_gpio_force_hold_en_all();
+
+
+  imuBeforeSleepChores();
+}
+
+void loop() {
+
+  wakeUpChores();
+  printWakeInfo();
+
+  beepAlive();
+  Serial.println("Booted...");
+
+  // todo:cs4:example
+  if (int1Status > 0) // If ISR has been serviced at least once
+  {
+    // Wait for a window (in case a second tap is coming)
+    delay(300);
+
+    // Check if there are more than one interrupt pulse
+    if (int1Status == 1) {
+      Serial.print("Single-tap event\n");
+    }
+    if (int1Status > 1) {
+      Serial.print("Double-tap event\n");
     }
 
-    delay(1);
+    // Clear the ISR counter
+    int1Status = 0;
+  }
+
+  // keep wake to have window to connect and re-flash if needed.
+  Serial.println("Flash window. tens of seconds.");
+  delay(20000);
+
+  // Enable Wake by timer
+  // esp_sleep_enable_timer_wakeup(WAKE_SECONDS * 1000000ULL);
+
+  beforeSleepChores();
+
+  // Sleep
+  Serial.println("Going to sleep for a long time...");
+  // esp_light_sleep_start();
+  esp_deep_sleep_start();
 }
