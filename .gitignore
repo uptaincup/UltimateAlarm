@@ -1,1 +1,12 @@
 .pio
+
+# IntelliJ
+/.idea/
+/*.iml
+/?open-ide-project-?ph?.app
+/out
+
+# MacOs Specific
+.Trash
+**/.DS_Store
+.DS_Store
