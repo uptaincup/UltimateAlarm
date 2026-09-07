@@ -20,5 +20,7 @@ IDE ->
   
 Project setup  
   
-// Must be set directly by patching library ~/Arduino/libraries/ElegantOTA/src/ElegantOTA.cpp. Details in libs git.  
-#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
+// ElegantOTA async mode has bug that it ignores #define ELEGANTOTA_USE_ASYNC_WEBSERVER 1 in project C files, so this param must be set either:
+- directly by patching library ~/Arduino/libraries/ElegantOTA/src/ElegantOTA.cpp. Details in lib's git. 
+   #define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
+- Passed as build flag -DELEGANTOTA_USE_ASYNC_WEBSERVER=1 (worked for PlatformIO)

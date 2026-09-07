@@ -1,3 +1,4 @@
+#include <Arduino.h>
 // cs4:todo: all this
 //+1) make i2c on LP lines
 // 2) IMU is wrong, should be in low power mode and more economic - see chat gpt.
@@ -6,7 +7,8 @@
 //+3) RTC ... do mods..
 // 4) INT1, INT2, SQW ? maybe combine some?
 // 6) rtc_gpio_isolate work for non LP GPIOS in deep sleep! This is not a substitute held, but it should be used when possible. Not work for mosfet drivers as may be some charge despite isolation. while with bjt it will work
-deprecated
+// 7. you can consider to re-integrate OTA and stuff from initial commits back, as I won and it will build fine
+
 #include "SparkFunLSM6DS3.h"
 #include "driver/gpio.h"
 #include "driver/rtc_io.h"
